@@ -1,0 +1,7 @@
+__pycache__/*
+result/*
+self_djitello.py
+plot.py
+.idea/
+test_copter_control.py
+.DS_Store/*

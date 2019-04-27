@@ -10,6 +10,15 @@ from socket import socket, AF_INET, SOCK_DGRAM
 HEIGHT = 600
 WIDHT = 760
 LENGTH = 80
+DELAY = 100
+PORT = 12345
+OBJECT_THRESHOLD = 65
+
+PREV_X = None
+PREV_Y = None
+COUNTER = 0
+
+coords = []
 
 def arg_parse():
     ap = argparse.ArgumentParser()
@@ -66,7 +75,7 @@ class Tracker(object):
 
     def draw_trajectory(self, grandpaFrame, frame, gray):
         frameDelta2 = cv2.absdiff(grandpaFrame, gray)
-        thresh = cv2.threshold(frameDelta2, 70, 255, cv2.THRESH_BINARY)[1]
+        thresh = cv2.threshold(frameDelta2, OBJECT_THRESHOLD, 255, cv2.THRESH_BINARY)[1]
 
         # for x, y in zip(*self.path_points):
         #     cv2.circle(frame, (x, y), 1, (0, 0, 255), -1)
@@ -96,11 +105,12 @@ class Tracker(object):
             text = "Occupied"
             break
 
-        cv2.putText(frame, "Room Status: {}".format(text), (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+        cv2.putText(frame, "Status: {}".format(text), (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
         return frame, text, cur_x, cur_y
 
 
     def stream(self):
+        global coords, PREV_X, PREV_Y, COUNTER
         """
         Главный цикл, в котором высвечивается кадр, а также отслеживается положение объекта при въезжании в кадр
         :return:
@@ -130,13 +140,32 @@ class Tracker(object):
             cnts = self.get_contours(thresh)
             frame, text, cur_x, cur_y = self.draw_object_box(cnts, frame, text)
 
-            if j % 300 == 0 and cur_x is not None:
-                msg = f'{cur_x},{cur_y}'
-                print(msg)
-                self.sock.sendto(msg.encode(),('', PORT))
+            if cur_x is not None:
+                if PREV_X is None:
+                    PREV_X = cur_x
+                    PREV_Y = cur_y
+
+                if np.abs(PREV_X - cur_x) < 10 and np.abs(PREV_Y - cur_y) < 10:
+                    COUNTER += 1
+
+                if COUNTER == 300:
+                    COUNTER = 0
+                    msg = f'{cur_x},{cur_y}'
+                    print(msg)
+                    self.sock.sendto(msg.encode(), ('', PORT))
+                PREV_X = cur_x
+                PREV_Y = cur_y
+
 
             frame = cv2.resize(frame, (WIDHT, HEIGHT))
             cv2.imshow("Security Feed", frame)
+            # cv2.imshow("Threshold result", frameDelta2)
+
+            # if j % 200 == 0:
+            #     cv2.imwrite(f'./result/true/{j}.png', frame)
+            #     cv2.imwrite(f'./result/threshold/{j}.png', frameDelta2)
+            if cur_x is not None:
+                coords.append((cur_x, cur_y))
 
             key = cv2.waitKey(1) & 0xFF
             firstFrame = gray
@@ -147,6 +176,9 @@ class Tracker(object):
 
         # cleanup the camera and close any open windows
         self.vs.stop() if self.args.get("video", None) is None else self.vs.release()
+        with open('./result/points/some1.txt', 'w') as f:
+            f.writelines([';'.join(list(map(str, el)))+'\n' for el in coords])
+
         cv2.destroyAllWindows()
 
 if __name__ == "__main__":
@@ -155,6 +187,6 @@ if __name__ == "__main__":
 
     sock = socket(AF_INET,SOCK_DGRAM)
     MAX_SIZE = 4096
-    PORT = 12345
+    PORT = PORT
     tracker = Tracker(args, path_maker, sock)
     tracker.stream()
